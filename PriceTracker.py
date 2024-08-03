@@ -1,5 +1,6 @@
 import time
 import logging
+import threading
 from telebot import types
 from utils import (
     load_json_file,
@@ -11,8 +12,6 @@ from utils import (
     ITEMS_PER_PAGE,
     bot
 )
-import asyncio  # For asynchronous handling
-
 
 # In-memory storage for conversation states
 user_states = {}
@@ -375,65 +374,67 @@ def handle_remove_notification_callback(call):
 
     bot.answer_callback_query(call.id)
 
-async def poll_prices():
-    """
-    Asynchronously polls the price of tokens in the watchlist and checks notifications.
-    """
+def poll_prices():
     while True:
         try:
             watchlist = load_json_file(WATCHLIST_FILE)
             notifications = load_json_file(NOTIFICATIONS_FILE)
             
-            for crypto_id, token in watchlist.items():
-                # Get the current price of the token
-                current_price = get_crypto_price(crypto_id)
+            for symbol, token in watchlist.items():
+                current_price = get_crypto_price(token['address'])
                 
                 if current_price is None:
                     logging.error(f"Failed to fetch price for {token['symbol']}")
                     continue
                 
-                if crypto_id in notifications:
-                    for notification in notifications[crypto_id]:
-                        chat_id = notification['chat_id']
-                        symbol = notification['symbol']
-                        change_type = notification['change_type']
-                        threshold = notification['threshold_percentage']
-                        previous_price = notification.get('previous_price', None)
-                        
-                        # Calculate percentage change
-                        if previous_price:
-                            price_change_percentage = ((current_price - previous_price) / previous_price) * 100
-                        else:
-                            notification['previous_price'] = current_price
-                            continue
-                        
-                        # Check if the notification should be triggered
-                        if (change_type == 'up' and price_change_percentage >= threshold) or (change_type == 'down' and price_change_percentage <= -threshold):
-                            bot.send_message(chat_id, f"📈 {symbol} price has gone {change_type} by {threshold}%. Current price: ${current_price:.2f}")
-                            logging.info(f"Notification triggered for {symbol}: {change_type} by {threshold}% at price ${current_price:.2f}")
+                if symbol in notifications:
+                    notif = notifications[symbol]
+                    chat_id = notif['chat_id']
+                    change_type = notif['change_type']
+                    threshold = notif['threshold_percentage']
+                    previous_price = notif.get('previous_price', None)
+                    
+                    if previous_price:
+                        price_change_percentage = ((current_price - previous_price) / previous_price) * 100
+                    else:
+                        notif['previous_price'] = current_price
+                        continue
+                    
+                    if (change_type == 'up' and price_change_percentage >= threshold) or \
+                       (change_type == 'down' and price_change_percentage <= -threshold):
+                        bot.send_message(chat_id, f"📈 {symbol} price has gone {change_type} by {threshold}%. Current price: ${current_price:.2f}")
+                        logging.info(f"Notification triggered for {symbol}: {change_type} by {threshold}% at price ${current_price:.2f}")
 
-                        # Update the previous price in the notifications list
-                        notification['previous_price'] = current_price
+                    notif['previous_price'] = current_price
 
-                    # Save the updated notifications
                     save_json_file(NOTIFICATIONS_FILE, notifications)
         
         except Exception as e:
             logging.error("Error in poll_prices loop: %s", str(e))
         
-        # Wait for a certain interval before polling again (e.g., 5 minutes)
-        await asyncio.sleep(300)  # 5 minutes
+        time.sleep(300)  # 5 minutes
+
+def main():
+    logging.info("Starting the bot and price polling service.")
+    
+    # Start the poll_prices function in a separate thread
+    price_polling_thread = threading.Thread(target=poll_prices)
+    price_polling_thread.daemon = True
+    price_polling_thread.start()
+    
+    # Start the bot's polling
+    try:
+        bot.polling(none_stop=True)
+    except KeyboardInterrupt:
+        logging.info("Bot stopped.")
+    except ConnectionError as e:
+        logging.error(f"ConnectionError occurred: {e}. Restart in 15 seconds...")
+        time.sleep(15)
+        main()
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}. Restart in 15 seconds...")
+        time.sleep(15)
+        main()
 
 if __name__ == "__main__":
-    logging.info("Starting the bot and price polling service.")
-    try:
-        # Create and set a new event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.create_task(poll_prices())
-        bot.polling(none_stop=True)
-    except Exception as e:
-        logging.error("An error occurred during bot initialization: %s", str(e))
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
+    main()
