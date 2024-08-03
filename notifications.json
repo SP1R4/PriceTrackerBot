@@ -1,0 +1,9 @@
+{
+    "CSIX": {
+        "chat_id": 298161516,
+        "symbol": "CSIX",
+        "change_type": "up",
+        "threshold_percentage": 10.0,
+        "previous_price": null
+    }
+}
