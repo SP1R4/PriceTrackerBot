@@ -145,7 +145,6 @@ def process_notification_details(message):
     the notification to the system if the format is correct.
     """
     chat_id = message.chat.id
-    print(chat_id)
     details = message.text.strip().lower()
     symbol = user_states.get(chat_id, {}).get('symbol')
 
