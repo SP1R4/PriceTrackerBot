@@ -38,14 +38,14 @@ The Crypto Tracker Telegram Bot allows users to monitor cryptocurrency prices, m
 1. **Clone the Repository:**
 
     ```sh
-    git clone https://github.com/your-username/crypto-tracker-bot.git
-    cd crypto-tracker-bot
+    git clone https://github.com/SP1R4/PriceTrackerBot.git
+    cd PriceTrackerBot
     ```
 
 2. **Install Dependencies:**
 
     ```sh
-    pip install -r requirements.txt
+    pip3 install -r requirements.txt
     ```
 
 3. **Create Configuration Files:**
@@ -56,7 +56,7 @@ The Crypto Tracker Telegram Bot allows users to monitor cryptocurrency prices, m
 4. **Run the Bot:**
 
     ```sh
-    python3 bot.py
+    python3 PriceTracker.py
     ```
 
 ## Usage
