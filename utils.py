@@ -5,7 +5,6 @@ import requests
 import telebot
 from dotenv import load_dotenv
 
-
 # Load environment variables
 load_dotenv()
 
@@ -21,7 +20,7 @@ ITEMS_PER_PAGE = 5
 logging.basicConfig(filename='crypto_tracker.log', level=logging.INFO,
                     format='%(asctime)s:%(levelname)s:%(message)s')
 
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'YOUR_TELEGRAM_KEY')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'YOUR_API_TOKEN')
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
 #===============================================
@@ -106,23 +105,37 @@ def get_token_info(token_address, network):
         logging.error(f"Failed to get token info for {token_address}: {e}")
     return None, None, None
 
-def get_crypto_price(token_address):
+def get_crypto_price(identifier):
     """
     Retrieves the token price in USD using the DEX Screener API.
 
     Args:
-        token_address (str): The contract address of the token.
+        identifier (str): The token symbol or contract address.
 
     Returns:
         str: The price of the token in USD, or 'N/A' if the price information is not found or an error occurs.
     """
+    watchlist = load_json_file(WATCHLIST_FILE)
+
+    # Determine if the identifier is a symbol or an address
+    token_info = None
+    if identifier.startswith("0x"):  # Likely an address
+        token_info = next((item for item in watchlist.values() if item['address'].lower() == identifier.lower()), None)
+    else:  # Likely a symbol
+        token_info = watchlist.get(identifier.upper())
+
+    if not token_info:
+        logging.error(f"No token found with identifier {identifier}.")
+        return 'N/A'
+
+    token_address = token_info['address']
     url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-    
+
     try:
         response = requests.get(url)
         response.raise_for_status()  # Raises an exception for HTTP errors
         data = response.json()
-        
+
         # Check if 'pairs' key exists in the data
         if 'pairs' in data:
             for pair in data['pairs']:
@@ -131,9 +144,9 @@ def get_crypto_price(token_address):
                 if base_token['address'].lower() == token_address.lower():
                     # Returning the price in USD
                     return pair.get('priceUsd', 'N/A')
-        
-        logging.error(f"No price information found for token {token_address}.")
-    
+
+        logging.error(f"No price information found for token {identifier}.")
+
     except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to get crypto price for {token_address}: {e}")
+        logging.error(f"Failed to get crypto price for {identifier}: {e}")
         return 'N/A'
