@@ -169,7 +169,7 @@ def process_notification_details(message):
                 'symbol': symbol,
                 'change_type': change_type,
                 'threshold_percentage': threshold_percentage,
-                'previous_price': None
+                'previous_price': get_crypto_price(symbol)
             }
 
             logging.debug(f"Updated notifications to be saved: {notifications}")
@@ -375,44 +375,73 @@ def handle_remove_notification_callback(call):
     bot.answer_callback_query(call.id)
 
 def poll_prices():
+    """
+    Periodically polls the prices of tokens in the watchlist and triggers notifications
+    if the price change exceeds the set threshold.
+    """
+    logging.info("Starting price polling service.")
+    watchlist = load_json_file(WATCHLIST_FILE)
+    notifications = load_json_file(NOTIFICATIONS_FILE)
+    logging.debug(f"Initial watchlist: {watchlist}")
+    logging.debug(f"Initial notifications: {notifications}")
+
     while True:
-        try:
-            watchlist = load_json_file(WATCHLIST_FILE)
-            notifications = load_json_file(NOTIFICATIONS_FILE)
-            
-            for symbol, token in watchlist.items():
-                current_price = get_crypto_price(token['address'])
-                
-                if current_price is None:
-                    logging.error(f"Failed to fetch price for {token['symbol']}")
+        for symbol, notification in notifications.items():
+            try:
+                chat_id = notification['chat_id']
+                change_type = notification['change_type']
+                threshold_percentage = notification['threshold_percentage']
+                previous_price = notification.get('previous_price')
+
+                # Get current price using the token's address from the watchlist
+                token_info = watchlist.get(symbol)
+                if not token_info:
+                    logging.warning(f"No token information found for symbol: {symbol}")
                     continue
-                
-                if symbol in notifications:
-                    notif = notifications[symbol]
-                    chat_id = notif['chat_id']
-                    change_type = notif['change_type']
-                    threshold = notif['threshold_percentage']
-                    previous_price = notif.get('previous_price', None)
-                    
-                    if previous_price:
-                        price_change_percentage = ((current_price - previous_price) / previous_price) * 100
-                    else:
-                        notif['previous_price'] = current_price
-                        continue
-                    
-                    if (change_type == 'up' and price_change_percentage >= threshold) or \
-                       (change_type == 'down' and price_change_percentage <= -threshold):
-                        bot.send_message(chat_id, f"📈 {symbol} price has gone {change_type} by {threshold}%. Current price: ${current_price:.2f}")
-                        logging.info(f"Notification triggered for {symbol}: {change_type} by {threshold}% at price ${current_price:.2f}")
 
-                    notif['previous_price'] = current_price
+                current_price = get_crypto_price(token_info['address'])
 
+                if current_price == 'N/A':
+                    logging.error(f"Failed to fetch current price for {symbol}.")
+                    continue
+
+                try:
+                    current_price = float(current_price)
+                except ValueError:
+                    logging.error(f"Invalid current price for {symbol}: {current_price}")
+                    continue
+
+                try:
+                    previous_price = float(previous_price)
+                except (TypeError, ValueError):
+                    # Initialize previous price on first run
+                    previous_price = None
+
+                if previous_price is None:
+                    # Initializing previous_price if it's the first time polling
+                    notification['previous_price'] = current_price
                     save_json_file(NOTIFICATIONS_FILE, notifications)
-        
-        except Exception as e:
-            logging.error("Error in poll_prices loop: %s", str(e))
-        
-        time.sleep(300)  # 5 minutes
+                    continue
+
+                price_change = (current_price - previous_price) / previous_price * 100
+                logging.debug(f"Price change for {symbol}: {price_change:.2f}%")
+
+                if ((change_type == 'up' and price_change >= threshold_percentage) or
+                    (change_type == 'down' and price_change <= -threshold_percentage)):
+                    # Notify the user
+                    direction = "increased" if change_type == 'up' else "decreased"
+                    message = f"🔔 {symbol} price has {direction} by {abs(price_change):.2f}%.\nCurrent price: ${current_price:.4f}"
+                    bot.send_message(chat_id, message)
+                    logging.info(f"Notification sent for {symbol}: {message}")
+
+                # Update previous price
+                notification['previous_price'] = current_price
+
+            except Exception as e:
+                logging.error(f"Error processing notification for {symbol}: {e}")
+
+        save_json_file(NOTIFICATIONS_FILE, notifications)
+        time.sleep(300) # 5 minutes
 
 def main():
     logging.info("Starting the bot and price polling service.")
@@ -432,9 +461,8 @@ def main():
         time.sleep(15)
         main()
     except Exception as e:
-        logging.error(f"Unexpected error: {e}. Restart in 15 seconds...")
-        time.sleep(15)
-        main()
+        logging.error(f"Unexpected error: {e}.")
+
 
 if __name__ == "__main__":
     main()
